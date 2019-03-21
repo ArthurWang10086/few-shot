@@ -7,12 +7,12 @@ from tqdm import tqdm
 import pandas as pd
 import numpy as np
 import os
-
 from config import DATA_PATH
+from config import UCMerced_Label_id
 
 
-class OmniglotDataset(Dataset):
-    def __init__(self, subset):
+class UCMercedDataset_finetune(Dataset):
+    def __init__(self, subset, **kwargs):
         """Dataset class representing Omniglot dataset
 
         # Arguments:
@@ -21,8 +21,114 @@ class OmniglotDataset(Dataset):
         if subset not in ('background', 'evaluation'):
             raise(ValueError, 'subset must be one of (background, evaluation)')
         self.subset = subset
+        self.eval_label = kwargs['eval_label']
 
-        self.df = pd.DataFrame(self.index_subset(self.subset))
+        if subset in ('background'):
+            self.df = pd.DataFrame(self.index_subset(self.subset,self.eval_label,'train'))
+        else:
+            self.df = pd.DataFrame(self.index_subset(self.subset,self.eval_label,'eval'))
+
+        # Index of dataframe has direct correspondence to item in dataset
+        self.df = self.df.assign(id=self.df.index.values)
+
+        # Convert arbitrary class names of dataset to ordered 0-(num_speakers - 1) integers
+        self.unique_characters = sorted(self.df['class_name'].unique())
+        self.class_name_to_id = UCMerced_Label_id
+        self.df = self.df.assign(class_id=self.df['class_name'].apply(lambda c: self.class_name_to_id[c]))
+        # Create dicts
+        self.datasetid_to_filepath = self.df.to_dict()['filepath']
+        self.datasetid_to_class_id = self.df.to_dict()['class_id']
+
+    def __getitem__(self, item):
+        instance = Image.open(self.datasetid_to_filepath[item])
+        instance = np.array(instance).transpose((2,0,1))/256.0
+        label = self.datasetid_to_class_id[item]
+        return instance, label
+
+    def __len__(self):
+        return len(self.df)
+
+    def num_classes(self):
+        return len(self.df['class_name'].unique())
+
+    @staticmethod
+    def index_subset(subset,eval_label,type):
+        """Index a subset by looping through all of its files and recording relevant information.
+
+        # Arguments
+            subset: Name of the subset
+
+        # Returns
+            A list of dicts containing information about all the image files in a particular subset of the
+            Omniglot dataset dataset
+        """
+        images = []
+        print('Indexing {}...'.format(subset))
+        # Quick first pass to find total for tqdm bar
+        subset_len = 0
+        if type=='train':
+            for root, folders, files in os.walk(DATA_PATH + '/UCMerced/images_{}/'.format(subset)):
+                if root.split('/')[-1] not in eval_label.split(','):
+                    subset_len += len([f for f in files if f.endswith('.tif')])
+            progress_bar = tqdm(total=subset_len)
+            for root, folders, files in os.walk(DATA_PATH + '/UCMerced/images_{}/'.format(subset)):
+                if len(files) == 0 or not files[0].endswith('.tif') or root.split('/')[-1] in eval_label.split(','):
+                    continue
+
+                alphabet = root.split('/')[-1]
+                class_name = '{}.{}'.format(alphabet, root.split('/')[-1])
+
+                for f in files:
+                    progress_bar.update(1)
+                    images.append({
+                        'subset': subset,
+                        'alphabet': alphabet,
+                        'class_name': class_name,
+                        'filepath': os.path.join(root, f)
+                    })
+
+            progress_bar.close()
+        else:
+            for root, folders, files in os.walk(DATA_PATH + '/UCMerced/images_{}/'.format(subset)):
+                if root.split('/')[-1] in eval_label.split(','):
+                    subset_len += len([f for f in files if f.endswith('.tif')])
+            progress_bar = tqdm(total=subset_len)
+            for root, folders, files in os.walk(DATA_PATH + '/UCMerced/images_{}/'.format(subset)):
+                if len(files) == 0 or not files[0].endswith('.tif') or root.split('/')[-1] not in eval_label.split(','):
+                    continue
+
+                alphabet = root.split('/')[-1]
+                class_name = '{}.{}'.format(alphabet, root.split('/')[-1])
+
+                for f in files:
+                    progress_bar.update(1)
+                    images.append({
+                        'subset': subset,
+                        'alphabet': alphabet,
+                        'class_name': class_name,
+                        'filepath': os.path.join(root, f)
+                    })
+
+            progress_bar.close()
+
+        return images
+
+class UCMercedDataset(Dataset):
+    def __init__(self, subset, **kwargs):
+        """Dataset class representing Omniglot dataset
+
+        # Arguments:
+            subset: Whether the dataset represents the background or evaluation set
+        """
+        if subset not in ('background', 'evaluation'):
+            raise(ValueError, 'subset must be one of (background, evaluation)')
+        self.subset = subset
+        self.eval_label = kwargs['eval_label']
+
+        if subset in ('background'):
+            self.df = pd.DataFrame(self.index_subset(self.subset,self.eval_label,'train'))
+        else:
+            self.df = pd.DataFrame(self.index_subset(self.subset,self.eval_label,'eval'))
 
         # Index of dataframe has direct correspondence to item in dataset
         self.df = self.df.assign(id=self.df.index.values)
@@ -31,7 +137,108 @@ class OmniglotDataset(Dataset):
         self.unique_characters = sorted(self.df['class_name'].unique())
         self.class_name_to_id = {self.unique_characters[i]: i for i in range(self.num_classes())}
         self.df = self.df.assign(class_id=self.df['class_name'].apply(lambda c: self.class_name_to_id[c]))
+        # Create dicts
+        self.datasetid_to_filepath = self.df.to_dict()['filepath']
+        self.datasetid_to_class_id = self.df.to_dict()['class_id']
 
+    def __getitem__(self, item):
+        instance = Image.open(self.datasetid_to_filepath[item])
+        instance = np.array(instance).transpose((2,0,1))/256.0
+        label = self.datasetid_to_class_id[item]
+        return instance, label
+
+    def __len__(self):
+        return len(self.df)
+
+    def num_classes(self):
+        return len(self.df['class_name'].unique())
+
+    @staticmethod
+    def index_subset(subset,eval_label,type):
+        """Index a subset by looping through all of its files and recording relevant information.
+
+        # Arguments
+            subset: Name of the subset
+
+        # Returns
+            A list of dicts containing information about all the image files in a particular subset of the
+            Omniglot dataset dataset
+        """
+        images = []
+        print('Indexing {}...'.format(subset))
+        # Quick first pass to find total for tqdm bar
+        subset_len = 0
+        if type=='train':
+            for root, folders, files in os.walk(DATA_PATH + '/UCMerced/images_{}/'.format(subset)):
+                if root.split('/')[-1] not in eval_label.split(','):
+                    subset_len += len([f for f in files if f.endswith('.tif')])
+            progress_bar = tqdm(total=subset_len)
+            for root, folders, files in os.walk(DATA_PATH + '/UCMerced/images_{}/'.format(subset)):
+                if len(files) == 0 or not files[0].endswith('.tif') or root.split('/')[-1] in eval_label.split(','):
+                    continue
+
+                alphabet = root.split('/')[-1]
+                class_name = '{}.{}'.format(alphabet, root.split('/')[-1])
+
+                for f in files:
+                    progress_bar.update(1)
+                    images.append({
+                        'subset': subset,
+                        'alphabet': alphabet,
+                        'class_name': class_name,
+                        'filepath': os.path.join(root, f)
+                    })
+
+            progress_bar.close()
+        else:
+            for root, folders, files in os.walk(DATA_PATH + '/UCMerced/images_{}/'.format(subset)):
+                if root.split('/')[-1] in eval_label.split(','):
+                    subset_len += len([f for f in files if f.endswith('.tif')])
+            progress_bar = tqdm(total=subset_len)
+            for root, folders, files in os.walk(DATA_PATH + '/UCMerced/images_{}/'.format(subset)):
+                if len(files) == 0 or not files[0].endswith('.tif') or root.split('/')[-1] not in eval_label.split(','):
+                    continue
+
+                alphabet = root.split('/')[-1]
+                class_name = '{}.{}'.format(alphabet, root.split('/')[-1])
+
+                for f in files:
+                    progress_bar.update(1)
+                    images.append({
+                        'subset': subset,
+                        'alphabet': alphabet,
+                        'class_name': class_name,
+                        'filepath': os.path.join(root, f)
+                    })
+
+            progress_bar.close()
+
+        return images
+
+class OmniglotDataset(Dataset):
+    def __init__(self, subset, **kwargs):
+        """Dataset class representing Omniglot dataset
+
+        # Arguments:
+            subset: Whether the dataset represents the background or evaluation set
+        """
+        if subset not in ('background', 'evaluation'):
+            raise(ValueError, 'subset must be one of (background, evaluation)')
+        self.subset = subset
+        self.eval_label = kwargs['eval_label']
+
+        if subset in ('background'):
+            self.df = pd.DataFrame(self.index_subset(self.subset))
+        else:
+            self.df = pd.DataFrame(self.index_subset(self.subset))
+
+        # Index of dataframe has direct correspondence to item in dataset
+        self.df = self.df.assign(id=self.df.index.values)
+
+        # Convert arbitrary class names of dataset to ordered 0-(num_speakers - 1) integers
+        self.unique_characters = sorted(self.df['class_name'].unique())
+        self.class_name_to_id = {self.unique_characters[i]: i for i in range(self.num_classes())}
+        self.df = self.df.assign(class_id=self.df['class_name'].apply(lambda c: self.class_name_to_id[c]))
         # Create dicts
         self.datasetid_to_filepath = self.df.to_dict()['filepath']
         self.datasetid_to_class_id = self.df.to_dict()['class_id']
@@ -74,7 +281,7 @@ class OmniglotDataset(Dataset):
 
         progress_bar = tqdm(total=subset_len)
         for root, folders, files in os.walk(DATA_PATH + '/Omniglot/images_{}/'.format(subset)):
-            if len(files) == 0:
+            if len(files) == 0 or not files[0].endswith('.png'):
                 continue
 
             alphabet = root.split('/')[-2]
@@ -94,7 +301,7 @@ class OmniglotDataset(Dataset):
 
 
 class MiniImageNet(Dataset):
-    def __init__(self, subset):
+    def __init__(self, subset, **kwargs):
         """Dataset class representing miniImageNet dataset
 
         # Arguments:
@@ -103,8 +310,12 @@ class MiniImageNet(Dataset):
         if subset not in ('background', 'evaluation'):
             raise(ValueError, 'subset must be one of (background, evaluation)')
         self.subset = subset
+        self.eval_label = kwargs['eval_label']
 
-        self.df = pd.DataFrame(self.index_subset(self.subset))
+        if subset in ('background'):
+            self.df = pd.DataFrame(self.index_subset(self.subset))
+        else:
+            self.df = pd.DataFrame(self.index_subset(self.subset))
 
         # Index of dataframe has direct correspondence to item in dataset
         self.df = self.df.assign(id=self.df.index.values)

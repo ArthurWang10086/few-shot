@@ -221,7 +221,7 @@ class CSVLogger(Callback):
             if os.path.exists(self.filename):
                 with open(self.filename, 'r' + self.file_flags) as f:
                     self.append_header = not bool(len(f.readline()))
-            mode = 'a'
+            mode = 'w'
         else:
             mode = 'w'
 
